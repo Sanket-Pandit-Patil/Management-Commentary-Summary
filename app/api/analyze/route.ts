@@ -59,7 +59,8 @@ Confidence:
 
 Forward guidance:
 - Summarize **only** what they explicitly guide on (revenue, margins, capex, and other specifics).
-- Avoid adding your own projections.
+- **Keep it short and concise**. Extract specific numbers/ranges (e.g. "Revenue: $10-12B").
+- Avoid adding your own projections or long textual explanations.
 
 Capacity utilization:
 - Only summarize if there is explicit discussion of utilization, load factors, occupancy, or similar metrics.
