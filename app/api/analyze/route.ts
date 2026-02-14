@@ -4,7 +4,9 @@ import { GoogleGenAI } from "@google/genai";
 export const runtime = "nodejs";
 
 const MAX_CHARS = 40_000; // keep within safe context window
-const MAX_FILE_BYTES = 4 * 1024 * 1024; // 4 MB limit for Vercel Serverless
+// No strict file size limit here because we fetch from Blob URL. 
+// However, we still want to avoid OOM on very large files, but 50-100MB should be fine in Node.
+const MAX_FILE_BYTES = 100 * 1024 * 1024;
 
 type Tone = "optimistic" | "cautious" | "neutral" | "pessimistic" | "unknown";
 type Confidence = "high" | "medium" | "low" | "unknown";
@@ -186,33 +188,51 @@ const EARNINGS_SUMMARY_SCHEMA = {
   ]
 } as const;
 
-async function extractTextFromFile(file: File): Promise<{ text: string, buffer: Buffer }> {
-  const arrayBuffer = await file.arrayBuffer();
-  if (arrayBuffer.byteLength > MAX_FILE_BYTES) {
-    throw new Error(
-      "File is too large for this demo environment. Please keep files under ~20 MB."
-    );
+// Helper to get buffer from input
+async function getFileBuffer(formData: FormData): Promise<{ buffer: Buffer; mimeType: string; name: string }> {
+  const file = formData.get("file");
+  const fileUrl = formData.get("fileUrl");
+  const mimeType = formData.get("mimeType") as string || "application/pdf"; // Default to PDF if missing
+
+  if (fileUrl && typeof fileUrl === "string") {
+    console.log(`[DEBUG] Fetching file from URL: ${fileUrl}`);
+    const res = await fetch(fileUrl);
+    if (!res.ok) throw new Error(`Failed to fetch file from Blob storage: ${res.statusText}`);
+    const arrayBuffer = await res.arrayBuffer();
+    return {
+      buffer: Buffer.from(arrayBuffer),
+      mimeType,
+      name: "blob_file.pdf" // Generic name for blob files
+    };
   }
 
-  const buffer = Buffer.from(arrayBuffer);
-  let text = "";
+  if (file instanceof File) {
+    const arrayBuffer = await file.arrayBuffer();
+    return {
+      buffer: Buffer.from(arrayBuffer),
+      mimeType: file.type,
+      name: file.name
+    };
+  }
 
-  if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+  throw new Error("No file or fileUrl provided.");
+}
+
+async function extractTextFromBuffer(buffer: Buffer, mimeType: string): Promise<string> {
+  if (mimeType === "application/pdf" || mimeType === "application/x-pdf") {
     try {
       // @ts-ignore
       const { PDFParse } = await import("pdf-parse");
       const parser = new PDFParse({ data: buffer });
       const pdfResult = await parser.getText();
-      text = pdfResult.text;
+      return pdfResult.text;
     } catch (e) {
-      console.error("PDF Parse Error, will try fallback methods if applicable", e);
+      console.error("PDF Parse Error", e);
+      return "";
     }
-  } else {
-    // Fallback: treat as UTF-8 text
-    text = buffer.toString("utf-8");
   }
-
-  return { text, buffer };
+  // Fallback / Text
+  return buffer.toString("utf-8");
 }
 
 async function summarizeEarningsCall(
@@ -238,7 +258,7 @@ async function summarizeEarningsCall(
   }
 
   const response = await ai.models.generateContent({
-    model: "models/gemini-2.5-flash", // gemini-2.5-flash supports multimodal
+    model: "models/gemini-2.5-flash",
     // @ts-ignore
     contents: contents,
     config: {
@@ -260,7 +280,6 @@ export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
     const tool = formData.get("tool");
-    const file = formData.get("file");
 
     if (tool !== "earnings_summary") {
       return NextResponse.json(
@@ -269,25 +288,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!(file instanceof File)) {
-      return NextResponse.json(
-        { error: "No file provided. Please attach a document." },
-        { status: 400 }
-      );
-    }
+    // 1. Get File Buffer (from Blob URL or direct upload)
+    const { buffer, mimeType, name } = await getFileBuffer(formData);
 
-    const { text, buffer } = await extractTextFromFile(file);
+    // 2. Extract Text
+    const text = await extractTextFromBuffer(buffer, mimeType);
     console.log(`[DEBUG] Extracted text length: ${text?.length}`);
-    console.log(`[DEBUG] Text preview: ${text?.slice(0, 200)}`);
 
-    // Check for "Scanned PDF" scenario (lots of pages but very little text)
-    // Heuristic: < 500 chars total for PDF.
-    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    // 3. Check for Scanned PDF
+    const isPdf = mimeType.includes("pdf");
     const isScanned = isPdf && (!text || text.trim().length < 500);
 
     if (isScanned) {
-      console.log("[INFO] Detected scanned PDF or insufficient text. Switching to Vision/OCR mode.");
-
+      console.log("[INFO] Detected scanned PDF. Switching to Vision Mode.");
       const base64Data = buffer.toString("base64");
       const summary = await summarizeEarningsCall(
         "Please analyze the attached PDF document. It appears to be a scanned transcript.",
@@ -296,8 +309,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(summary);
     }
 
-    // Text-based processing (Original flow)
-    // Limit the text length to avoid hitting token limits
+    // 4. Text Analysis
     const trimmedText = text.slice(0, MAX_CHARS);
     const userPrompt = `
 Transcript text (may be truncated for length):
@@ -310,11 +322,7 @@ Transcript text (may be truncated for length):
   } catch (error: any) {
     console.error("Error in /api/analyze:", error);
     return NextResponse.json(
-      {
-        error:
-          error?.message ??
-          "Unexpected error while processing the document. Please try again."
-      },
+      { error: error?.message ?? "Unexpected error." },
       { status: 500 }
     );
   }
