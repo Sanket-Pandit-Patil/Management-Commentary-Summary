@@ -49,6 +49,17 @@ export default function HomePage() {
       return;
     }
 
+    // Vercel Serverless Function Limit is 4.5 MB.
+    // We limit to 4MB to be safe with headers/encoding.
+    const MAX_MB = 4;
+    if (file.size > MAX_MB * 1024 * 1024) {
+      setApiState({
+        status: "error",
+        message: `File is too large (${Math.round(file.size / 1024 / 1024 * 10) / 10} MB). Please upload a file smaller than ${MAX_MB} MB for this demo.`
+      });
+      return;
+    }
+
     const formData = new FormData();
     formData.append("file", file);
     formData.append("tool", "earnings_summary");
@@ -181,9 +192,8 @@ export default function HomePage() {
                 Reset
               </button>
               <span
-                className={`status-text${
-                  apiState.status === "error" ? " error" : ""
-                }`}
+                className={`status-text${apiState.status === "error" ? " error" : ""
+                  }`}
               >
                 {apiState.status === "idle" && (
                   <>Attach a file and click &ldquo;Run tool&rdquo; to begin.</>

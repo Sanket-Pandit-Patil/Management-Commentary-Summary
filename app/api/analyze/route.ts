@@ -4,7 +4,7 @@ import { GoogleGenAI } from "@google/genai";
 export const runtime = "nodejs";
 
 const MAX_CHARS = 40_000; // keep within safe context window
-const MAX_FILE_BYTES = 20 * 1024 * 1024; // ~20 MB to allow slightly larger PDFs
+const MAX_FILE_BYTES = 4 * 1024 * 1024; // 4 MB limit for Vercel Serverless
 
 type Tone = "optimistic" | "cautious" | "neutral" | "pessimistic" | "unknown";
 type Confidence = "high" | "medium" | "low" | "unknown";
