@@ -13,18 +13,23 @@ It is designed to:
 
 ### Stack
 
-- **Framework**: Next.js `16.1.6` (App Router)
+- **Frontend**: Next.js `16.1.6` (App Router) + `@vercel/blob` for large file uploads (>4.5MB)
 - **Language**: TypeScript
 - **UI**: Minimal custom CSS, responsive layout
 - **LLM client**: `@google/genai@1.41.0` calling a Gemini model (e.g. `gemini-2.5-flash`)
-- **Document parsing**: `pdf-parse@2.4.5` for PDFs, UTF‑8 text fallback for `.txt`/`.md`/`.rtf`
+- **Document parsing**:
+    -   `pdf-parse@2.4.5` for text-based PDFs
+    -   **Gemini Vision/OCR** for scanned PDFs (Smart Fallback)
+    -   UTF‑8 text fallback for `.txt`/`.md`/`.rtf`
 
 ---
 
 ### Tool Implemented – Option B
 
-**Input**:  
+**Input**:
 Earnings call transcript or management commentary (PDF / text).
+- **Supports Large Files**: Uses Vercel Blob to bypass Serverless payload limits.
+- **Supports Scanned Docs**: Automatically detects scanned PDFs and uses AI Vision for analysis.
 
 **Output (structured JSON rendered in UI)**:
 
@@ -46,24 +51,24 @@ The backend enforces this shape with a **JSON schema** passed to the model, so t
 
 ### Judgment Calls & How They’re Implemented
 
-- **How is management tone assessed?**  
-  - The system prompt defines clear categories (`optimistic`, `cautious`, `neutral`, `pessimistic`, `unknown`).  
+- **How is management tone assessed?**
+  - The system prompt defines clear categories (`optimistic`, `cautious`, `neutral`, `pessimistic`, `unknown`).
   - The model must also return a short **`tone_rationale`** so it “shows its work” rather than picking labels blindly.
 
-- **How to avoid hallucinations?**  
-  - System prompt explicitly says: **“Never hallucinate or invent numbers, guidance, or initiatives.”**  
-  - If something is missing or vague, the model must return **`null`** or an **empty array**, not fill it.  
+- **How to avoid hallucinations?**
+  - System prompt explicitly says: **“Never hallucinate or invent numbers, guidance, or initiatives.”**
+  - If something is missing or vague, the model must return **`null`** or an **empty array**, not fill it.
   - We use `response_format: json_schema` so the model can’t add extra fields or free‑form text.
 
-- **What if sections are missing in the transcript?**  
-  - `tone` / `confidence`: fall back to `"unknown"` if unclear.  
-  - Lists like `key_positives`, `key_concerns`, `growth_initiatives`: may be empty arrays.  
+- **What if sections are missing in the transcript?**
+  - `tone` / `confidence`: fall back to `"unknown"` if unclear.
+  - Lists like `key_positives`, `key_concerns`, `growth_initiatives`: may be empty arrays.
   - String fields like `capacity_utilization`: can be `null` and are rendered in the UI with explicit “not discussed” helper text.
 
-- **How specific is guidance when vague?**  
+- **How specific is guidance when vague?**
   - Prompt tells the model to be **conservative**: summarize only what’s clearly guided (revenue, margins, capex) and avoid adding its own projections.
 
-- **How do we prevent quoting things that weren’t said?**  
+- **How do we prevent quoting things that weren’t said?**
   - Supporting quotes are **optional**; the model is reminded never to fabricate them and to only extract explicit snippets.
 
 ---
@@ -90,6 +95,7 @@ The backend enforces this shape with a **JSON schema** passed to the model, so t
 
    ```bash
    GEMINI_API_KEY=your_real_gemini_key_here
+   BLOB_READ_WRITE_TOKEN=your_vercel_blob_token_here (optional for local if using remote blob)
    ```
 
 3. **Start the dev server**
@@ -106,7 +112,8 @@ The backend enforces this shape with a **JSON schema** passed to the model, so t
 
 1. **Upload document**
    - Supported: `PDF`, `.txt`, `.md`, `.rtf` (single file per run).
-   - Recommended size: **≤ 10 MB** and **1–2 earnings calls** per run to stay within context limits.
+   - Recommended size: Up to **500MB** (via Vercel Blob).
+   - **Scanning Support**: Handles image-only PDFs automatically.
 
 2. **Run the research tool**
    - Tool selector is pre‑set to **“Earnings call / management commentary summary”** (Option B).
@@ -132,11 +139,15 @@ You can copy text blocks directly into notes or export the JSON from the API for
    - Connect it to the repository containing this code.
    - Vercel should auto-detect **Next.js**.
 
-2. **Set environment variables**
+2. **Setup Storage**
+   - Go to **Storage** tab -> **Connect Store** -> **Blob**.
+   - Create a new Blob store. This automatically adds `BLOB_READ_WRITE_TOKEN`.
+
+3. **Set environment variables**
    - In the project’s **Settings → Environment Variables**, add:
      - `GEMINI_API_KEY` – your Gemini API key (from Google AI Studio).
 
-3. **Deploy**
+4. **Deploy**
    - Trigger a production deployment (Vercel will run `npm install` and `npm run build`).
    - Once finished, you will get a **public URL** you can share for evaluation.
 
