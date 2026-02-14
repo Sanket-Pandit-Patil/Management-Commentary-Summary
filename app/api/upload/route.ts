@@ -24,6 +24,7 @@ export async function POST(request: Request): Promise<NextResponse> {
                         'application/rtf',
                         'text/markdown'
                     ],
+                    addRandomSuffix: true, // Fix "File already exists" error
                     tokenPayload: JSON.stringify({
                         // optional, sent to your server on upload completion
                     }),
